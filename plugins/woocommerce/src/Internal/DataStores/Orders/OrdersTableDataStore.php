@@ -1364,7 +1364,7 @@ WHERE
 
 		$data_sync_enabled =
 			$data_synchronizer->data_sync_is_enabled()
-			&& ! doing_action( 'woocommerce_deliver_webhook_async' ) 
+			&& ! doing_action( 'woocommerce_deliver_webhook_async' )
 			&& ! doing_action( 'wc-admin_import_orders' );
 
 		if ( $data_sync_enabled ) {
@@ -1512,7 +1512,7 @@ WHERE
 	 *
 	 * @param \WC_Abstract_Order $order Order object.
 	 * @param \WC_Abstract_Order $post_order Order object initialized from post.
-	 * @param string $mode The sync mode to use. Accepted values: 'strict' or 'eager'. Defaults to 'strict'.
+	 * @param string             $mode       The sync mode to use. Accepted values: 'strict' or 'eager'. Defaults to 'strict'.
 	 *
 	 * @return void
 	 * @throws \Exception If passed an invalid order.
