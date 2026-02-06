@@ -1364,19 +1364,34 @@ WHERE
 
 		$data_sync_enabled = $data_synchronizer->data_sync_is_enabled();
 		if ( $data_sync_enabled ) {
-			// We prefer not syncing-on-read if we are inside a webhook delivery or importing orders, as those events are likely triggered after the order is written
-			// and we don't want to possibly create loops of sync-on-read.
-			$should_sync_on_read = ! doing_action( 'woocommerce_deliver_webhook_async' ) && ! doing_action( 'wc-admin_import_orders' );
-
 			/**
-			 * Allow opportunity to disable sync on read, while keeping sync on write enabled. This adds another step as a large shop progresses from full sync to no sync with HPOS authoritative.
-			 * This filter is only executed if data sync is enabled from settings in the first place as it's meant to be a step between full sync -> no sync, rather than be a control for enabling just the sync on read. Sync on read without sync on write is problematic as any update will reset on the next read, but sync on write without sync on read is fine.
+			 * Allow opportunity to enable sync on read, while keeping sync on write enabled.
+			 * Defaults to false. Sync on read without sync on write is problematic as any update
+			 * will reset on the next read, but sync on write without sync on read is fine.
 			 *
-			 * @param bool $read_on_sync_enabled Whether to sync on read.
+			 * This filter is only executed if data sync is enabled from settings in the first place
+			 * as it's meant to be a step between full sync -> no sync, rather than be a control for
+			 * enabling just the sync on read.
+			 *
+			 * @param bool|string $sync_on_read_mode Whether and how to sync on read. Accepted values:
+			 *   - false: Sync on read is disabled (default).
+			 *   - true or 'strict': Sync only when the post record is strictly more recent.
+			 *   - 'eager': Sync when the post record is the same age or more recent.
 			 *
 			 * @since 8.1.0
 			 */
-			$data_sync_enabled = apply_filters( 'woocommerce_hpos_enable_sync_on_read', $should_sync_on_read );
+			$sync_on_read_mode = apply_filters( 'woocommerce_hpos_enable_sync_on_read', false );
+
+			// Never sync-on-read during webhook delivery or order imports, as those events are
+			// likely triggered after the order is written and could create loops.
+			$sync_on_read_mode = $sync_on_read_mode && ! doing_action( 'woocommerce_deliver_webhook_async' ) && ! doing_action( 'wc-admin_import_orders' );
+
+			// Normalize truthy values to 'strict'.
+			if ( $sync_on_read_mode && 'eager' !== $sync_on_read_mode ) {
+				$sync_on_read_mode = 'strict';
+			}
+
+			$data_sync_enabled = (bool) $sync_on_read_mode;
 		}
 
 		$load_posts_for = array_diff( $order_ids, array_merge( self::$reading_order_ids, self::$backfilling_order_ids ) );
@@ -1408,7 +1423,7 @@ WHERE
 
 			if ( $data_sync_enabled && isset( $post_orders[ $order_id ] ) && $this->should_sync_order( $order ) ) {
 				self::$reading_order_ids[] = $order_id;
-				$this->maybe_sync_order( $order, $post_orders[ $order->get_id() ] );
+				$this->maybe_sync_order( $order, $post_orders[ $order->get_id() ], $sync_on_read_mode );
 			}
 		}
 	}
@@ -1506,7 +1521,7 @@ WHERE
 	 * @return void
 	 * @throws \Exception If passed an invalid order.
 	 */
-	private function maybe_sync_order( \WC_Abstract_Order &$order, \WC_Abstract_Order $post_order ) {
+	private function maybe_sync_order( \WC_Abstract_Order &$order, \WC_Abstract_Order $post_order, string $mode = 'strict' ) {
 		if ( ! $this->is_post_different_from_order( $order, $post_order ) ) {
 			return;
 		}
@@ -1518,12 +1533,17 @@ WHERE
 		$post_order_modified_date = is_null( $post_order_modified_date ) ? 0 : $post_order_modified_date->getTimestamp();
 
 		/**
-		 * We are here because there was difference in the post and order data even though sync is enabled. If the modified date in
-		 * the post is the same or more recent than the modified date in the order object, we update the order object with the data
-		 * from the post. The opposite case is handled in 'backfill_post_record'. This mitigates the case where other plugins write
-		 * to the post or postmeta directly.
+		 * We are here because there was a difference in the post and order data even though sync is enabled.
+		 * In 'strict' mode, we only update if the post is strictly more recent than the HPOS record.
+		 * In 'eager' mode, we also update when both have the same modified date.
+		 * The opposite case is handled in 'backfill_post_record'. This mitigates the case where other
+		 * plugins write to the post or postmeta directly.
 		 */
-		if ( $post_order_modified_date >= $order_modified_date ) {
+		$should_sync = 'eager' === $mode
+			? $post_order_modified_date >= $order_modified_date
+			: $post_order_modified_date > $order_modified_date;
+
+		if ( $should_sync ) {
 			$this->migrate_post_record( $order, $post_order );
 		}
 	}
