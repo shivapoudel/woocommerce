@@ -1496,6 +1496,7 @@ class OrdersTableDataStoreTests extends \HposTestCase {
 
 		$this->toggle_cot_authoritative( true );
 		$this->enable_cot_sync();
+		add_filter( 'woocommerce_hpos_enable_sync_on_read', fn() => 'eager' );
 
 		$now    = time() - ( 10 * MINUTE_IN_SECONDS );
 		$before = $now - ( 10 * MINUTE_IN_SECONDS );
@@ -1547,10 +1548,136 @@ class OrdersTableDataStoreTests extends \HposTestCase {
 		$order = wc_get_order( $order->get_id() );
 		$this->assertTrue( $sync_on_read_triggered );
 		remove_all_actions( 'woocommerce_hpos_post_record_migrated_on_read' );
+		remove_all_filters( 'woocommerce_hpos_enable_sync_on_read' );
 
 		// Compare dates again.
 		$this->assertEquals( $order->get_date_modified( 'edit' )->getTimestamp(), $now );
 		$this->assertEquals( get_post_modified_time( 'U', true, $order->get_id() ), $now );
+	}
+
+	/**
+	 * @testdox Sync-on-read is disabled by default even when data sync is enabled.
+	 */
+	public function test_sync_on_read_disabled_by_default(): void {
+		global $wpdb;
+
+		$this->toggle_cot_authoritative( true );
+		$this->enable_cot_sync();
+
+		$now    = time() - ( 10 * MINUTE_IN_SECONDS );
+		$before = $now - ( 10 * MINUTE_IN_SECONDS );
+
+		$order = new \WC_Order();
+		$order->set_status( OrderStatus::PROCESSING );
+		$order->set_billing_first_name( 'Duke' );
+		$order->save();
+
+		$order->set_date_modified( $before );
+		$order->save();
+
+		$wpdb->update(
+			$wpdb->posts,
+			array( 'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', $now ) ),
+			array( 'ID' => $order->get_id() )
+		);
+		clean_post_cache( $order->get_id() );
+		add_post_meta( $order->get_id(), 'foo', 'bar' );
+
+		$sync_on_read_triggered = false;
+		add_action(
+			'woocommerce_hpos_post_record_migrated_on_read',
+			function () use ( &$sync_on_read_triggered ) {
+				$sync_on_read_triggered = true;
+			}
+		);
+
+		$this->reset_order_data_store_state( $this->sut );
+		wc_get_order( $order->get_id() );
+
+		$this->assertFalse( $sync_on_read_triggered, 'Sync-on-read should not trigger when filter defaults to false' );
+		remove_all_actions( 'woocommerce_hpos_post_record_migrated_on_read' );
+	}
+
+	/**
+	 * @testdox Test sync-on-read modes.
+	 *
+	 * @testWith [true, "newer", true]
+	 *           [true, "equal", false]
+	 *           [true, "older", false]
+	 *           [false, "newer", false]
+	 *           [false, "equal", false]
+	 *           [false, "older", false]
+	 *           ["strict", "newer", true]
+	 *           ["strict", "equal", false]
+	 *           ["strict", "older", false]
+	 *           ["eager", "newer", true]
+	 *           ["eager", "equal", true]
+	 *           ["eager", "older", false]
+	 *
+	 * @param bool|string $mode           The sync-on-read filter value.
+	 * @param string      $post_age       The post's age relative to the HPOS record: 'newer', 'equal', or 'older'.
+	 * @param bool        $expected_sync  Whether sync-on-read is expected to trigger.
+	 */
+	public function test_sync_on_read_modes( $mode, string $post_age, bool $expected_sync ): void {
+		global $wpdb;
+
+		$this->toggle_cot_authoritative( true );
+		$this->enable_cot_sync();
+
+		add_filter( 'woocommerce_hpos_enable_sync_on_read', fn() => $mode );
+
+		$now    = time() - ( 10 * MINUTE_IN_SECONDS );
+		$before = $now - ( 10 * MINUTE_IN_SECONDS );
+
+		$order = new \WC_Order();
+		$order->set_status( OrderStatus::PROCESSING );
+		$order->set_billing_first_name( 'Duke' );
+		$order->save();
+
+		if ( 'newer' === $post_age ) {
+			$order->set_date_modified( $before );
+			$order->save();
+
+			$wpdb->update(
+				$wpdb->posts,
+				array( 'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', $now ) ),
+				array( 'ID' => $order->get_id() )
+			);
+			clean_post_cache( $order->get_id() );
+		} elseif ( 'older' === $post_age ) {
+			$order->set_date_modified( $now );
+			$order->save();
+
+			$wpdb->update(
+				$wpdb->posts,
+				array( 'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', $before ) ),
+				array( 'ID' => $order->get_id() )
+			);
+			clean_post_cache( $order->get_id() );
+		}
+
+		add_post_meta( $order->get_id(), 'foo', 'bar' );
+
+		$sync_on_read_triggered = false;
+		add_action(
+			'woocommerce_hpos_post_record_migrated_on_read',
+			function () use ( &$sync_on_read_triggered ) {
+				$sync_on_read_triggered = true;
+			}
+		);
+
+		$this->reset_order_data_store_state( $this->sut );
+		$order = wc_get_order( $order->get_id() );
+
+		$mode_label = is_bool( $mode ) ? var_export( $mode, true ) : $mode;
+		$this->assertSame( $expected_sync, $sync_on_read_triggered, "Mode=$mode_label, post_age=$post_age" );
+
+		if ( $expected_sync ) {
+			$this->assertEquals( 'bar', $order->get_meta( 'foo' ) );
+		}
+
+		remove_all_actions( 'woocommerce_hpos_post_record_migrated_on_read' );
+		remove_all_filters( 'woocommerce_hpos_enable_sync_on_read' );
 	}
 
 	/**
