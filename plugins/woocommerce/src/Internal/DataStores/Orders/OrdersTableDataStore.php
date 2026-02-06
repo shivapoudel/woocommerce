@@ -1362,7 +1362,11 @@ WHERE
 			return;
 		}
 
-		$data_sync_enabled = $data_synchronizer->data_sync_is_enabled();
+		$data_sync_enabled =
+			$data_synchronizer->data_sync_is_enabled()
+			&& ! doing_action( 'woocommerce_deliver_webhook_async' ) 
+			&& ! doing_action( 'wc-admin_import_orders' );
+
 		if ( $data_sync_enabled ) {
 			/**
 			 * Allow opportunity to enable sync on read, while keeping sync on write enabled.
@@ -1381,16 +1385,7 @@ WHERE
 			 * @since 8.1.0
 			 */
 			$sync_on_read_mode = apply_filters( 'woocommerce_hpos_enable_sync_on_read', false );
-
-			// Never sync-on-read during webhook delivery or order imports, as those events are
-			// likely triggered after the order is written and could create loops.
-			$sync_on_read_mode = $sync_on_read_mode && ! doing_action( 'woocommerce_deliver_webhook_async' ) && ! doing_action( 'wc-admin_import_orders' );
-
-			// Normalize truthy values to 'strict'.
-			if ( $sync_on_read_mode && 'eager' !== $sync_on_read_mode ) {
-				$sync_on_read_mode = 'strict';
-			}
-
+			$sync_on_read_mode = $sync_on_read_mode ? ( 'eager' === $sync_on_read_mode ? 'eager' : 'strict' ) : false;
 			$data_sync_enabled = (bool) $sync_on_read_mode;
 		}
 
@@ -1517,6 +1512,7 @@ WHERE
 	 *
 	 * @param \WC_Abstract_Order $order Order object.
 	 * @param \WC_Abstract_Order $post_order Order object initialized from post.
+	 * @param string $mode The sync mode to use. Accepted values: 'strict' or 'eager'. Defaults to 'strict'.
 	 *
 	 * @return void
 	 * @throws \Exception If passed an invalid order.
@@ -1539,7 +1535,8 @@ WHERE
 		 * The opposite case is handled in 'backfill_post_record'. This mitigates the case where other
 		 * plugins write to the post or postmeta directly.
 		 */
-		$should_sync = 'eager' === $mode
+		$should_sync =
+			'eager' === $mode
 			? $post_order_modified_date >= $order_modified_date
 			: $post_order_modified_date > $order_modified_date;
 
