@@ -1,7 +1,7 @@
 /**
  * External dependencies
  */
-import { store } from '@wordpress/interactivity';
+import { store, getContext } from '@wordpress/interactivity';
 import type { ProductResponseItem } from '@woocommerce/types';
 import type { ProductsStore } from '@woocommerce/stores/woocommerce/products';
 
@@ -16,9 +16,24 @@ const productsStore = store< ProductsStore >( 'woocommerce/products', {
 	},
 } );
 
+/**
+ * The context shape set by the woocommerce/single-product block. When the
+ * add-to-cart-with-options block (or any other consumer) renders inside a
+ * Single Product block, this per-element context takes precedence over the
+ * global template state so that each product in a loop gets its own IDs.
+ */
+type SingleProductContext = {
+	productId: number;
+	variationId: number | null;
+};
+
 export type ProductContextState = {
 	productId: number;
 	variationId: number | null;
+	templateState: {
+		productId: number;
+		variationId: number | null;
+	};
 };
 
 const productContextStore = store< {
@@ -35,6 +50,24 @@ const productContextStore = store< {
 	'woocommerce/product-context',
 	{
 		state: {
+			get productId(): number {
+				const context = getContext< SingleProductContext >(
+					'woocommerce/single-product'
+				);
+				return (
+					context?.productId ??
+					productContextStore.state.templateState?.productId
+				);
+			},
+			get variationId(): number | null {
+				const context = getContext< SingleProductContext >(
+					'woocommerce/single-product'
+				);
+				return (
+					context?.variationId ??
+					productContextStore.state.templateState?.variationId
+				);
+			},
 			get parentProduct(): ProductResponseItem | undefined {
 				return productsStore.state.products[
 					productContextStore.state.productId
@@ -56,10 +89,26 @@ const productContextStore = store< {
 		},
 		actions: {
 			setProductId: ( productId: number ) => {
-				productContextStore.state.productId = productId;
+				const context = getContext< SingleProductContext >(
+					'woocommerce/single-product'
+				);
+				if ( context?.productId !== undefined ) {
+					context.productId = productId;
+				} else {
+					productContextStore.state.templateState.productId =
+						productId;
+				}
 			},
 			setVariationId: ( variationId: number | null ) => {
-				productContextStore.state.variationId = variationId;
+				const context = getContext< SingleProductContext >(
+					'woocommerce/single-product'
+				);
+				if ( context?.variationId !== undefined ) {
+					context.variationId = variationId;
+				} else {
+					productContextStore.state.templateState.variationId =
+						variationId;
+				}
 			},
 		},
 	},
