@@ -339,7 +339,8 @@ const { actions, state } = store<
 				const { selectedAttributes } = getContext< Context >();
 
 				const id =
-					productContextState.variationId || productContextState.productId;
+					productContextState.variationId ||
+					productContextState.productId;
 
 				const productType = productContextState.variationId
 					? 'variation'

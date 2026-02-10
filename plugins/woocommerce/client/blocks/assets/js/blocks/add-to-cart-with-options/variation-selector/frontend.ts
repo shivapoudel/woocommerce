@@ -101,7 +101,7 @@ const isAttributeValueValid = ( {
 		? selectedAttributes.length - 1
 		: selectedAttributes.length;
 
-	const product = productsState.products[ productContextState.productId ];
+	const product = productContextState.product;
 
 	if ( ! product?.variations?.length ) {
 		return false;
@@ -340,8 +340,7 @@ const { actions, state } = store< VariableProductAddToCartWithOptionsStore >(
 					return;
 				}
 
-				const product =
-					productsState.products[ productContextState.productId ];
+				const product = productContextState.product;
 				if ( ! product ) {
 					return;
 				}
@@ -408,8 +407,7 @@ const { actions, state } = store< VariableProductAddToCartWithOptionsStore >(
 				} );
 			},
 			setSelectedVariationId: () => {
-				const product =
-					productsState.products[ productContextState.productId ];
+				const product = productContextState.product;
 
 				if ( ! product?.variations?.length ) {
 					return;
@@ -434,8 +432,7 @@ const { actions, state } = store< VariableProductAddToCartWithOptionsStore >(
 			validateVariation() {
 				actions.clearErrors( 'variable-product' );
 
-				const product =
-					productsState.products[ productContextState.productId ];
+				const product = productContextState.product;
 
 				if ( ! product?.variations?.length ) {
 					return;
