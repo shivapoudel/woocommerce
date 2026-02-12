@@ -61,6 +61,10 @@ const productElementStore = store(
 	'woocommerce/product-elements',
 	{
 		state: {
+			// TODO: This reads from getConfig('woocommerce').products, a
+			// separate data store from the products store. Ideally this
+			// should use product-context getters, but that requires adding
+			// weight/dimensions to the Store API first.
 			get productData(): ProductData | undefined {
 				if ( ! productContextState?.productId ) {
 					return undefined;
